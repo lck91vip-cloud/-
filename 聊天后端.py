@@ -6,11 +6,11 @@ import time
 import secrets
 from flask import Flask, request, Response, jsonify, stream_with_context
 from flask_cors import CORS
+from threading import Thread
 
 app = Flask(__name__)
 CORS(app)
 
-# ===== 初始化数据库 =====
 BASE_DIR = './liaotian'
 KEY_DIR = os.path.join(BASE_DIR, 'key')
 RECORD_DIR = os.path.join(BASE_DIR, 'record')
@@ -52,7 +52,6 @@ def init_chat_db():
 init_user_db()
 init_chat_db()
 
-# ===== 密码工具 =====
 def hash_password(password):
     salt = secrets.token_hex(8)
     hash_obj = hashlib.sha256((salt + password).encode())
@@ -61,8 +60,8 @@ def hash_password(password):
 def verify_password(password, salt, stored_hash):
     return hashlib.sha256((salt + password).encode()).hexdigest() == stored_hash
 
-# ===== 在线用户管理（以用户名为键，IP为值） =====
-online_users = {}  # username -> ip
+# ===== 在线用户管理 =====
+online_users = {}  # username -> {'ip': ip, 'last_active': timestamp}
 
 # ===== 消息存储 =====
 def save_message(msg_type, nickname, content=None):
@@ -83,11 +82,34 @@ def get_all_messages():
     conn.close()
     return [{'type': r[0], 'nickname': r[1], 'content': r[2], 'timestamp': r[3]} for r in rows]
 
-# ===== SSE 消息队列 =====
+# ===== 消息队列 =====
 pending_messages = []
 
 def broadcast_message(msg):
     pending_messages.append(msg)
+
+# ===== 心跳清理线程 =====
+def clean_inactive_users():
+    """每分钟检查一次，清理超过 5 分钟无活动的用户"""
+    while True:
+        time.sleep(60)
+        now = time.time()
+        to_remove = []
+        for username, info in online_users.items():
+            if now - info['last_active'] > 300:  # 5 分钟
+                to_remove.append(username)
+        for username in to_remove:
+            del online_users[username]
+            # 发送离开消息（可选）
+            save_message('system', username, f'🚶 {username} 超时离开聊天室')
+            broadcast_message({
+                'type': 'system',
+                'content': f'🚶 {username} 超时离开聊天室',
+                'timestamp': int(time.time() * 1000)
+            })
+
+# 启动清理线程
+Thread(target=clean_inactive_users, daemon=True).start()
 
 # ===== 路由 =====
 
@@ -119,7 +141,6 @@ def login():
     if not username or not password:
         return jsonify({'error': '用户名和密码必填'}), 400
 
-    # 验证用户
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     c.execute('SELECT password_hash, salt FROM users WHERE username=?', (username,))
@@ -132,25 +153,38 @@ def login():
         return jsonify({'error': '用户名或密码错误'}), 401
 
     client_ip = request.remote_addr
+    now = time.time()
 
-    # 判断是首次登录还是重连
+    # 判断该用户名是否首次登录（当前不在线）
     is_new = username not in online_users
+
+    # 更新或添加在线状态
+    online_users[username] = {'ip': client_ip, 'last_active': now}
+
+    # 只有首次登录才发送进入提示
     if is_new:
-        # 首次登录：发送系统消息
         save_message('system', username, f'👋 {username} 加入了聊天室')
         broadcast_message({
             'type': 'system',
             'content': f'👋 {username} 加入了聊天室',
-            'timestamp': int(time.time() * 1000)
+            'timestamp': int(now * 1000)
         })
-    # 更新在线状态（无论是新登录还是重连）
-    online_users[username] = client_ip
 
     return jsonify({
         'message': '登录成功',
         'username': username,
         'users': list(online_users.keys())
     }), 200
+
+@app.route('/heartbeat', methods=['POST'])
+def heartbeat():
+    """客户端定期调用，更新活跃时间"""
+    data = request.get_json()
+    username = data.get('username')
+    if username and username in online_users:
+        online_users[username]['last_active'] = time.time()
+        return jsonify({'status': 'ok'}), 200
+    return jsonify({'error': '未登录'}), 401
 
 @app.route('/logout', methods=['POST'])
 def logout():
@@ -174,7 +208,6 @@ def send_message():
     content = data.get('content')
     if not username or not content:
         return jsonify({'error': '缺少参数'}), 400
-    # 检查用户是否在线
     if username not in online_users:
         return jsonify({'error': '未登录或账号不一致'}), 401
 
@@ -185,17 +218,17 @@ def send_message():
         'content': content,
         'timestamp': ts
     })
+    # 更新活跃时间
+    online_users[username]['last_active'] = time.time()
     return jsonify({'message': '发送成功'}), 200
 
 @app.route('/stream')
 def stream():
-    """SSE 事件流"""
     all_msgs = get_all_messages()
     if len(all_msgs) > 50:
         all_msgs = all_msgs[-50:]
 
     def event_stream():
-        # 发送历史消息
         for msg in all_msgs:
             yield f"data: {json.dumps(msg)}\n\n"
         last_id = len(all_msgs)
