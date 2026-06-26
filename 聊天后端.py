@@ -8,7 +8,7 @@ from flask import Flask, request, Response, jsonify, stream_with_context
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # 允许跨域
+CORS(app)
 
 # ===== 初始化数据库 =====
 BASE_DIR = './liaotian'
@@ -61,8 +61,8 @@ def hash_password(password):
 def verify_password(password, salt, stored_hash):
     return hashlib.sha256((salt + password).encode()).hexdigest() == stored_hash
 
-# ===== 在线用户管理（基于IP限制，每个IP只能一个账号） =====
-online_users = {}  # ip -> username
+# ===== 在线用户管理（以用户名为键，IP为值） =====
+online_users = {}  # username -> ip
 
 # ===== 消息存储 =====
 def save_message(msg_type, nickname, content=None):
@@ -83,18 +83,11 @@ def get_all_messages():
     conn.close()
     return [{'type': r[0], 'nickname': r[1], 'content': r[2], 'timestamp': r[3]} for r in rows]
 
-# ===== SSE 推送 =====
-# 存储每个客户端的响应流（用于推送）
-clients = []  # 存储 (ip, response) 但实际使用 Flask 的 stream_with_context
-
-# 使用全局消息队列（简单列表，实际生产可用 Redis）
+# ===== SSE 消息队列 =====
 pending_messages = []
 
 def broadcast_message(msg):
-    """将消息加入待推送队列，并通知所有客户端"""
     pending_messages.append(msg)
-    # 由于 SSE 是长连接，我们通过生成器持续检查 pending_messages
-    # 但无法主动通知，所以只能依靠客户端每帧的等待循环。
 
 # ===== 路由 =====
 
@@ -105,7 +98,6 @@ def register():
     password = data.get('password')
     if not username or not password:
         return jsonify({'error': '用户名和密码必填'}), 400
-    # 检查是否已存在
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     c.execute('SELECT id FROM users WHERE username=?', (username,))
@@ -139,35 +131,39 @@ def login():
     if not verify_password(password, salt, stored_hash):
         return jsonify({'error': '用户名或密码错误'}), 401
 
-    # 检查IP是否已被占用（每个设备只能一个账号）
     client_ip = request.remote_addr
-    if client_ip in online_users and online_users[client_ip] != username:
-        return jsonify({'error': f'该设备已登录账号 "{online_users[client_ip]}"，请先退出'}), 403
 
-    # 登录成功
-    # 如果该IP已有账号且是自己，则更新（避免重复）
-    online_users[client_ip] = username
+    # 判断是首次登录还是重连
+    is_new = username not in online_users
+    if is_new:
+        # 首次登录：发送系统消息
+        save_message('system', username, f'👋 {username} 加入了聊天室')
+        broadcast_message({
+            'type': 'system',
+            'content': f'👋 {username} 加入了聊天室',
+            'timestamp': int(time.time() * 1000)
+        })
+    # 更新在线状态（无论是新登录还是重连）
+    online_users[username] = client_ip
 
-    # 系统消息：用户加入
-    save_message('system', username, f'👋 {username} 加入了聊天室')
-    broadcast_message({'type': 'system', 'content': f'👋 {username} 加入了聊天室', 'timestamp': int(time.time()*1000)})
-
-    # 返回成功，并告知当前所有在线用户列表
     return jsonify({
         'message': '登录成功',
         'username': username,
-        'users': list(online_users.values())
+        'users': list(online_users.keys())
     }), 200
 
 @app.route('/logout', methods=['POST'])
 def logout():
     data = request.get_json()
     username = data.get('username')
-    client_ip = request.remote_addr
-    if client_ip in online_users and online_users[client_ip] == username:
-        del online_users[client_ip]
+    if username in online_users:
+        del online_users[username]
         save_message('system', username, f'🚶 {username} 离开了聊天室')
-        broadcast_message({'type': 'system', 'content': f'🚶 {username} 离开了聊天室', 'timestamp': int(time.time()*1000)})
+        broadcast_message({
+            'type': 'system',
+            'content': f'🚶 {username} 离开了聊天室',
+            'timestamp': int(time.time() * 1000)
+        })
         return jsonify({'message': '已退出'}), 200
     return jsonify({'error': '未登录'}), 401
 
@@ -178,45 +174,39 @@ def send_message():
     content = data.get('content')
     if not username or not content:
         return jsonify({'error': '缺少参数'}), 400
-    # 验证该用户是否在线（可选）
-    client_ip = request.remote_addr
-    if client_ip not in online_users or online_users[client_ip] != username:
+    # 检查用户是否在线
+    if username not in online_users:
         return jsonify({'error': '未登录或账号不一致'}), 401
 
-    # 保存消息
     ts = save_message('message', username, content)
-    broadcast_message({'type': 'message', 'nickname': username, 'content': content, 'timestamp': ts})
+    broadcast_message({
+        'type': 'message',
+        'nickname': username,
+        'content': content,
+        'timestamp': ts
+    })
     return jsonify({'message': '发送成功'}), 200
 
 @app.route('/stream')
 def stream():
     """SSE 事件流"""
-    client_ip = request.remote_addr
-    # 获取历史消息（最多50条）
     all_msgs = get_all_messages()
-    # 只保留最近50条，避免一次性发送太多
     if len(all_msgs) > 50:
         all_msgs = all_msgs[-50:]
 
     def event_stream():
-        # 先发送历史消息
+        # 发送历史消息
         for msg in all_msgs:
             yield f"data: {json.dumps(msg)}\n\n"
-        # 然后持续监听新消息
-        last_id = len(all_msgs)  # 简单计数，用于标记已发送
+        last_id = len(all_msgs)
         while True:
-            # 检查全局 pending_messages 是否有新消息
-            # 为了避免频繁循环，使用 time.sleep
             time.sleep(0.5)
-            # 检查是否有新消息（从数据库获取最新）
-            # 更高效：使用队列，但为了简化，我们从数据库读取最新ID
             conn = sqlite3.connect(CHAT_DB)
             c = conn.cursor()
             c.execute('SELECT COUNT(*) FROM messages')
             count = c.fetchone()[0]
             conn.close()
             if count > last_id:
-                # 有新消息，获取新消息
                 conn = sqlite3.connect(CHAT_DB)
                 c = conn.cursor()
                 c.execute('SELECT type, nickname, content, timestamp FROM messages WHERE id > ?', (last_id,))
@@ -231,11 +221,10 @@ def stream():
 
 @app.route('/users', methods=['GET'])
 def get_users():
-    return jsonify(list(online_users.values())), 200
+    return jsonify(list(online_users.keys())), 200
 
 @app.route('/messages', methods=['GET'])
 def get_messages():
-    # 用于初始加载
     msgs = get_all_messages()
     return jsonify(msgs), 200
 
@@ -251,6 +240,5 @@ if __name__ == '__main__':
         s.close()
     print(f"✅ 服务器启动")
     print(f"📡 本机IP: {ip}")
-    # 读取 Railway 分配的端口（关键修改）
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, threaded=True)
