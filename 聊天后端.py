@@ -249,7 +249,8 @@ if __name__ == '__main__':
         ip = '127.0.0.1'
     finally:
         s.close()
-    print(f"✅ 服务器启动，监听 0.0.0.0:8080")
+    print(f"✅ 服务器启动")
     print(f"📡 本机IP: {ip}")
-    print("📌 前端用这个IP连接即可")
-    app.run(host='0.0.0.0', port=8080, threaded=True)
+    # 读取 Railway 分配的端口（关键修改）
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, threaded=True)
