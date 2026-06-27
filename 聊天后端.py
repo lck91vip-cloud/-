@@ -176,12 +176,10 @@ def clean_inactive_users():
     while True:
         time.sleep(60)
         now = time.time()
-        # 清理过期封禁
         clean_expired_bans()
-        # 清理超时在线用户
         to_remove = []
         for username, info in online_users.items():
-            if now - info['last_active'] > 300:  # 5 分钟
+            if now - info['last_active'] > 300:
                 to_remove.append(username)
         for username in to_remove:
             del online_users[username]
@@ -209,7 +207,6 @@ def admin_required(f):
 
 @app.route('/')
 def index():
-    """返回聊天页面"""
     try:
         with open('index.html', 'r', encoding='utf-8') as f:
             html = f.read()
@@ -245,7 +242,6 @@ def login():
     if not username or not password:
         return jsonify({'error': '用户名和密码必填'}), 400
 
-    # 验证用户
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     c.execute('SELECT password_hash, salt FROM users WHERE username=?', (username,))
@@ -257,7 +253,6 @@ def login():
     if not verify_password(password, salt, stored_hash):
         return jsonify({'error': '用户名或密码错误'}), 401
 
-    # 检查封禁
     ban_until = get_ban(username)
     if ban_until is not None:
         if ban_until == -1:
@@ -266,14 +261,12 @@ def login():
             remaining = (ban_until - int(time.time())) // 3600
             return jsonify({'error': f'该账号已被封禁，剩余 {remaining} 小时'}), 403
         else:
-            remove_ban(username)  # 自动解封
+            remove_ban(username)
 
     client_ip = request.remote_addr
     now = time.time()
-
     is_new = username not in online_users
     online_users[username] = {'ip': client_ip, 'last_active': now}
-
     if is_new:
         save_message('system', username, f'👋 {username} 加入了聊天室')
         broadcast_message({
@@ -321,7 +314,6 @@ def send_message():
         return jsonify({'error': '缺少参数'}), 400
     if username not in online_users:
         return jsonify({'error': '未登录或账号不一致'}), 401
-
     ts = save_message('message', username, content)
     broadcast_message({
         'type': 'message',
@@ -369,7 +361,7 @@ def get_messages_public():
     return jsonify([{'type': m['type'], 'nickname': m['nickname'], 'content': m['content'], 'timestamp': m['timestamp']} for m in msgs]), 200
 
 # ============================================================
-#  管理员后台（包含踢出、封禁、解封、IP显示等完整功能）
+#  管理员后台
 # ============================================================
 
 @app.route('/admin/login', methods=['POST'])
@@ -391,7 +383,6 @@ def admin_logout():
 @app.route('/admin')
 def admin_panel():
     if not session.get('admin'):
-        # 登录页面
         return '''
         <!DOCTYPE html>
         <html>
@@ -465,7 +456,7 @@ def admin_panel():
         </html>
         '''
 
-    # 管理主界面（含在线用户IP、踢出、封禁、封禁列表等）
+    # 管理主界面（含精确剩余时间显示）
     return '''
     <!DOCTYPE html>
     <html>
@@ -539,7 +530,6 @@ def admin_panel():
             <button class="logout-btn" onclick="logout()">退出管理</button>
         </div>
 
-        <!-- 注册用户 -->
         <div class="card">
             <h2>👥 注册用户 <span class="badge" id="userCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -550,7 +540,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- 聊天记录 -->
         <div class="card">
             <h2>💬 聊天记录 <span class="badge" id="msgCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -561,7 +550,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- 在线用户（含 IP 和踢出/封禁） -->
         <div class="card">
             <h2>🟢 在线用户 <span class="badge" id="onlineCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -572,7 +560,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- 封禁列表 -->
         <div class="card">
             <h2>⛔ 封禁列表 <span class="badge" id="banCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -585,9 +572,24 @@ def admin_panel():
     </div>
 
     <script>
+        // ---------- 工具函数：精确格式化剩余时间 ----------
+        function formatRemainingTime(seconds) {
+            if (seconds === -1) return '永久';
+            if (seconds <= 0) return '已过期';
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            let parts = [];
+            if (days > 0) parts.push(days + '天');
+            if (hours > 0) parts.push(hours + '小时');
+            if (minutes > 0) parts.push(minutes + '分');
+            if (secs > 0) parts.push(secs + '秒');
+            return parts.join('') || '0秒';
+        }
+
         // ---------- 数据获取 ----------
         async function fetchData() {
-            // 用户列表
             const usersResp = await fetch('/admin/api/users');
             const users = await usersResp.json();
             let usersBody = '';
@@ -603,7 +605,6 @@ def admin_panel():
             document.querySelector('#usersTable tbody').innerHTML = usersBody || `<tr><td colspan="5" class="empty">暂无用户</td></tr>`;
             document.getElementById('userCount').textContent = users.length;
 
-            // 消息列表
             const msgsResp = await fetch('/admin/api/messages');
             const msgs = await msgsResp.json();
             let msgsBody = '';
@@ -621,7 +622,6 @@ def admin_panel():
             document.querySelector('#messagesTable tbody').innerHTML = msgsBody || `<tr><td colspan="6" class="empty">暂无消息</td></tr>`;
             document.getElementById('msgCount').textContent = msgs.length;
 
-            // 在线用户（含 IP）
             const onlineResp = await fetch('/admin/api/online_detail');
             const online = await onlineResp.json();
             let onlineBody = '';
@@ -638,14 +638,14 @@ def admin_panel():
             document.querySelector('#onlineTable tbody').innerHTML = onlineBody || `<tr><td colspan="3" class="empty">当前没有用户在线</td></tr>`;
             document.getElementById('onlineCount').textContent = online.length;
 
-            // 封禁列表
             const bansResp = await fetch('/admin/api/bans');
             const bans = await bansResp.json();
             let bansBody = '';
             bans.forEach(b => {
+                const remainingText = formatRemainingTime(b.remaining_seconds);
                 bansBody += `<tr>
                     <td><strong>${b.username}</strong></td>
-                    <td>${b.remaining}</td>
+                    <td>${remainingText}</td>
                     <td><button class="btn btn-success" onclick="unbanUser('${b.username}')">解封</button></td>
                 </tr>`;
             });
@@ -726,7 +726,6 @@ def admin_panel():
             window.location.href = '/admin';
         }
 
-        // 初次加载 + 定时刷新
         fetchData();
         setInterval(fetchData, 5000);
     </script>
@@ -754,7 +753,6 @@ def admin_online():
 @app.route('/admin/api/online_detail')
 @admin_required
 def admin_online_detail():
-    # 返回用户名和IP的列表
     return jsonify([{'username': u, 'ip': info['ip']} for u, info in online_users.items()]), 200
 
 @app.route('/admin/api/delete_user', methods=['POST'])
@@ -804,12 +802,11 @@ def admin_kick():
 def admin_ban():
     data = request.get_json()
     username = data.get('username')
-    duration = data.get('duration')  # 小时数，0 表示永久
+    duration = data.get('duration')
     if not username:
         return jsonify({'error': '缺少用户名'}), 400
     if username == ADMIN_USERNAME:
         return jsonify({'error': '不能封禁管理员'}), 403
-    # 先踢出
     if username in online_users:
         del online_users[username]
         save_message('system', '管理员', f'⛔ {username} 被管理员封禁')
@@ -845,12 +842,15 @@ def admin_bans():
     for b in bans:
         if b['ban_until'] == -1:
             b['remaining'] = '永久'
+            b['remaining_seconds'] = -1
         else:
             remaining = b['ban_until'] - now
             if remaining > 0:
+                b['remaining_seconds'] = remaining
                 hours = remaining // 3600
                 b['remaining'] = f'{hours} 小时'
             else:
+                b['remaining_seconds'] = 0
                 b['remaining'] = '已过期（可解封）'
     return jsonify(bans), 200
 

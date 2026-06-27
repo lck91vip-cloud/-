@@ -666,11 +666,27 @@
     }
 
     // ============================================================
-    //  处理服务器推送的消息
+    //  处理服务器推送的消息（增加踢出/封禁检测）
     // ============================================================
     function handleServerMessage(msg) {
         if (msg.type === 'system') {
-            addMessage('system', msg.content);
+            const content = msg.content || '';
+            // 检测是否针对当前用户
+            if (myUsername && content.includes(myUsername)) {
+                // 被踢出
+                if (content.includes('被管理员踢出')) {
+                    alert('⛔ 您已被管理员踢出聊天室');
+                    forceLogout();
+                    return;
+                }
+                // 被封禁
+                if (content.includes('被管理员封禁')) {
+                    alert('⛔ 您的账号已被管理员封禁');
+                    forceLogout();
+                    return;
+                }
+            }
+            addMessage('system', content);
         } else if (msg.type === 'message') {
             addMessage('chat', {
                 nickname: msg.nickname,
@@ -681,6 +697,30 @@
             updateUserList(msg.users);
         } else {
             // 未知类型忽略
+        }
+    }
+
+    // ---------- 强制退出（清除状态，跳转到登录页） ----------
+    function forceLogout() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        stopReconnect();
+        clearCredentials();
+        myUsername = '';
+        chatApp.style.display = 'none';
+        authModal.style.display = 'flex';
+        setConnectionStatus(false);
+        messageArea.innerHTML = '';
+        userList.innerHTML = '<div class="empty-users">暂无其他用户在线</div>';
+        onlineCount.textContent = '0';
+        onlineBadge.textContent = '● 0 在线';
+        usernameInput.value = '';
+        passwordInput.value = '';
+        authError.textContent = '';
+        if (!isLoginMode) {
+            toggleAuthLink.click(); // 恢复登录模式
         }
     }
 
