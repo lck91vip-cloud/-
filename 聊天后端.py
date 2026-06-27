@@ -310,18 +310,97 @@ def admin_logout():
 
 @app.route('/admin')
 def admin_panel():
-    """管理页面 HTML"""
+    """管理页面 HTML（优化UI）"""
     if not session.get('admin'):
+        # 优化后的登录页面
         return '''
         <!DOCTYPE html>
         <html>
-        <head><title>管理员登录</title></head>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>管理员登录</title>
+            <style>
+                * { margin:0; padding:0; box-sizing:border-box; }
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    background: linear-gradient(135deg, #e8f0fe 0%, #d4e4f7 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                }
+                .login-card {
+                    background: white;
+                    border-radius: 24px;
+                    box-shadow: 0 20px 60px rgba(0,20,50,0.15);
+                    padding: 40px 32px;
+                    max-width: 400px;
+                    width: 100%;
+                    transition: transform 0.2s;
+                }
+                .login-card h2 {
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: #1a2634;
+                    margin-bottom: 8px;
+                    text-align: center;
+                }
+                .login-card .sub {
+                    text-align: center;
+                    color: #7a8a9e;
+                    font-size: 14px;
+                    margin-bottom: 28px;
+                }
+                .login-card input {
+                    width: 100%;
+                    padding: 12px 16px;
+                    border: 2px solid #e6ecf3;
+                    border-radius: 12px;
+                    font-size: 15px;
+                    outline: none;
+                    transition: border 0.2s, box-shadow 0.2s;
+                    background: #f7f9fc;
+                    margin-bottom: 16px;
+                }
+                .login-card input:focus {
+                    border-color: #2d7aff;
+                    background: white;
+                    box-shadow: 0 0 0 4px rgba(45,122,255,0.1);
+                }
+                .login-card button {
+                    width: 100%;
+                    padding: 12px;
+                    background: #2d7aff;
+                    color: white;
+                    border: none;
+                    border-radius: 14px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: background 0.2s, transform 0.1s;
+                }
+                .login-card button:hover { background: #1a5fd9; }
+                .login-card button:active { transform: scale(0.98); }
+                .login-card .msg {
+                    margin-top: 14px;
+                    text-align: center;
+                    color: #ef5350;
+                    font-size: 14px;
+                    min-height: 20px;
+                }
+            </style>
+        </head>
         <body>
-            <h2>管理员登录</h2>
-            <input id="user" placeholder="用户名" value="admin"><br>
-            <input id="pass" type="password" placeholder="密码" value="admin123"><br>
-            <button onclick="login()">登录</button>
-            <div id="msg"></div>
+            <div class="login-card">
+                <h2>🔐 管理员登录</h2>
+                <div class="sub">请输入管理员凭证</div>
+                <input id="user" placeholder="用户名" value="admin">
+                <input id="pass" type="password" placeholder="密码" value="admin123">
+                <button onclick="login()">登录</button>
+                <div class="msg" id="msg"></div>
+            </div>
             <script>
                 async function login() {
                     const username = document.getElementById('user').value;
@@ -335,93 +414,236 @@ def admin_panel():
                     if (resp.ok) {
                         window.location.href = '/admin';
                     } else {
-                        document.getElementById('msg').innerText = '登录失败: ' + data.error;
+                        document.getElementById('msg').innerText = '❌ ' + data.error;
                     }
                 }
+                // 回车触发登录
+                document.getElementById('pass').addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') login();
+                });
+                document.getElementById('user').addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') login();
+                });
             </script>
         </body>
         </html>
         '''
-    # 管理员已登录，显示管理界面
+
+    # 管理员已登录，显示优化后的管理界面
     return '''
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>后台管理</title>
         <style>
-            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-            h1 { color: #333; }
-            .section { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background: #f2f2f2; }
-            .btn { background: #e74c3c; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
-            .btn:hover { background: #c0392b; }
-            .logout { float: right; background: #3498db; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; }
-            .logout:hover { background: #2980b9; }
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background: #f2f6fc;
+                padding: 20px;
+                color: #1a2634;
+            }
+            .container { max-width: 1200px; margin: 0 auto; }
+            .header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: white;
+                padding: 16px 28px;
+                border-radius: 16px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+                margin-bottom: 24px;
+            }
+            .header h1 {
+                font-size: 22px;
+                font-weight: 600;
+                color: #1a2634;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .header .logout-btn {
+                background: #ef5350;
+                color: white;
+                border: none;
+                padding: 8px 20px;
+                border-radius: 10px;
+                font-size: 14px;
+                cursor: pointer;
+                transition: background 0.2s;
+                font-weight: 500;
+            }
+            .header .logout-btn:hover { background: #c62828; }
+            .card {
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+                padding: 20px 24px 28px;
+                margin-bottom: 24px;
+                overflow-x: auto;
+            }
+            .card h2 {
+                font-size: 18px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .card h2 .badge {
+                background: #e8f0fe;
+                color: #2d7aff;
+                font-size: 13px;
+                font-weight: 500;
+                padding: 2px 12px;
+                border-radius: 20px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 14px;
+            }
+            th {
+                text-align: left;
+                padding: 12px 12px 12px 0;
+                border-bottom: 2px solid #e6ecf3;
+                color: #5a6a7e;
+                font-weight: 600;
+                background: #fafcfe;
+            }
+            td {
+                padding: 12px 12px 12px 0;
+                border-bottom: 1px solid #eef2f7;
+                vertical-align: middle;
+            }
+            tr:hover td { background: #f8faff; }
+            .btn {
+                background: #ef5350;
+                color: white;
+                border: none;
+                padding: 4px 14px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 13px;
+                transition: background 0.2s, transform 0.1s;
+                font-weight: 500;
+            }
+            .btn:hover { background: #c62828; }
+            .btn:active { transform: scale(0.95); }
+            .online-tag {
+                display: inline-block;
+                background: #e8f5e9;
+                color: #2e7d32;
+                padding: 4px 14px;
+                border-radius: 20px;
+                font-size: 14px;
+                margin: 4px 6px 4px 0;
+            }
+            .empty {
+                color: #9aabbf;
+                padding: 16px 0;
+                text-align: center;
+            }
+            .timestamp {
+                color: #7a8a9e;
+                font-size: 13px;
+            }
+            /* 响应式 */
+            @media (max-width: 600px) {
+                .header { flex-direction: column; align-items: flex-start; gap: 12px; }
+                .card { padding: 16px; }
+                table { font-size: 13px; }
+                th, td { padding: 8px 6px; }
+                .btn { padding: 3px 10px; font-size: 12px; }
+            }
         </style>
     </head>
     <body>
-        <h1>后台管理 <button class="logout" onclick="logout()">退出管理</button></h1>
-        <div class="section">
-            <h2>注册用户</h2>
-            <table id="usersTable">
-                <tr><th>ID</th><th>用户名</th><th>密码哈希</th><th>盐</th><th>操作</th></tr>
-            </table>
+        <div class="container">
+            <div class="header">
+                <h1>🛠️ 管理面板</h1>
+                <button class="logout-btn" onclick="logout()">退出管理</button>
+            </div>
+
+            <div class="card">
+                <h2>👥 注册用户 <span class="badge" id="userCount">0</span></h2>
+                <div style="overflow-x:auto;">
+                    <table id="usersTable">
+                        <thead><tr><th>ID</th><th>用户名</th><th>密码哈希</th><th>盐</th><th>操作</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>💬 聊天记录 <span class="badge" id="msgCount">0</span></h2>
+                <div style="overflow-x:auto;">
+                    <table id="messagesTable">
+                        <thead><tr><th>ID</th><th>类型</th><th>昵称</th><th>内容</th><th>时间</th><th>操作</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🟢 在线用户 <span class="badge" id="onlineCount">0</span></h2>
+                <div id="onlineUsers" style="padding-top: 6px;"></div>
+            </div>
         </div>
-        <div class="section">
-            <h2>聊天记录</h2>
-            <table id="messagesTable">
-                <tr><th>ID</th><th>类型</th><th>昵称</th><th>内容</th><th>时间戳</th><th>操作</th></tr>
-            </table>
-        </div>
-        <div class="section">
-            <h2>在线用户</h2>
-            <div id="onlineUsers"></div>
-        </div>
+
         <script>
             async function fetchData() {
-                // 获取用户列表
+                // 用户列表
                 const usersResp = await fetch('/admin/api/users');
                 const users = await usersResp.json();
-                let usersHtml = '<tr><th>ID</th><th>用户名</th><th>密码哈希</th><th>盐</th><th>操作</th></tr>';
+                let usersBody = '';
                 users.forEach(u => {
-                    usersHtml += `<tr>
+                    usersBody += `<tr>
                         <td>${u.id}</td>
-                        <td>${u.username}</td>
-                        <td>${u.password_hash}</td>
-                        <td>${u.salt}</td>
+                        <td><strong>${u.username}</strong></td>
+                        <td style="font-family:monospace;font-size:13px;color:#555;">${u.password_hash}</td>
+                        <td style="font-family:monospace;font-size:13px;color:#555;">${u.salt}</td>
                         <td><button class="btn" onclick="deleteUser(${u.id})">删除</button></td>
                     </tr>`;
                 });
-                document.getElementById('usersTable').innerHTML = usersHtml;
+                document.querySelector('#usersTable tbody').innerHTML = usersBody || `<tr><td colspan="5" class="empty">暂无用户</td></tr>`;
+                document.getElementById('userCount').textContent = users.length;
 
-                // 获取消息列表
+                // 消息列表
                 const msgsResp = await fetch('/admin/api/messages');
                 const msgs = await msgsResp.json();
-                let msgsHtml = '<tr><th>ID</th><th>类型</th><th>昵称</th><th>内容</th><th>时间戳</th><th>操作</th></tr>';
+                let msgsBody = '';
                 msgs.forEach(m => {
                     const time = new Date(m.timestamp).toLocaleString();
-                    msgsHtml += `<tr>
+                    msgsBody += `<tr>
                         <td>${m.id}</td>
                         <td>${m.type}</td>
                         <td>${m.nickname}</td>
-                        <td>${m.content}</td>
-                        <td>${time}</td>
+                        <td>${m.content || ''}</td>
+                        <td class="timestamp">${time}</td>
                         <td><button class="btn" onclick="deleteMessage(${m.id})">删除</button></td>
                     </tr>`;
                 });
-                document.getElementById('messagesTable').innerHTML = msgsHtml;
+                document.querySelector('#messagesTable tbody').innerHTML = msgsBody || `<tr><td colspan="6" class="empty">暂无消息</td></tr>`;
+                document.getElementById('msgCount').textContent = msgs.length;
 
-                // 获取在线用户
+                // 在线用户
                 const onlineResp = await fetch('/admin/api/online');
                 const online = await onlineResp.json();
-                document.getElementById('onlineUsers').innerHTML = online.length ? online.join(', ') : '无';
+                const onlineDiv = document.getElementById('onlineUsers');
+                if (online.length) {
+                    onlineDiv.innerHTML = online.map(u => `<span class="online-tag">${u}</span>`).join('');
+                } else {
+                    onlineDiv.innerHTML = '<span class="empty">当前没有用户在线</span>';
+                }
+                document.getElementById('onlineCount').textContent = online.length;
             }
 
             async function deleteUser(id) {
-                if (!confirm('确认删除该用户？')) return;
+                if (!confirm('确认删除该用户？此操作不可恢复！')) return;
                 const resp = await fetch('/admin/api/delete_user', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -450,7 +672,7 @@ def admin_panel():
             }
 
             fetchData();
-            setInterval(fetchData, 5000); // 每5秒刷新
+            setInterval(fetchData, 5000);
         </script>
     </body>
     </html>
