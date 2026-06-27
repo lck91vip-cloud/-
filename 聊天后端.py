@@ -731,3 +731,13 @@ if __name__ == '__main__':
     print(f"📡 本机IP: {ip}")
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, threaded=True)
+    
+@app.route('/')
+def index():
+    """返回聊天页面"""
+    try:
+        with open('index.html', 'r', encoding='utf-8') as f:
+            html = f.read()
+        return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+    except FileNotFoundError:
+        return jsonify({'error': 'index.html not found'}), 404
