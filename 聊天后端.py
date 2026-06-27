@@ -157,11 +157,6 @@ def index():
     except FileNotFoundError:
         return jsonify({'error': 'index.html not found'}), 404
 
-
-@app.route('/register', methods=['POST'])
-def register():
-    # ...
-
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
