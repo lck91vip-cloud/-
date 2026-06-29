@@ -666,20 +666,27 @@
     }
 
     // ============================================================
-    //  处理服务器推送的消息（增加踢出/封禁检测）
+    //  处理服务器推送的消息（增加历史消息判断）
     // ============================================================
     function handleServerMessage(msg) {
         if (msg.type === 'system') {
             const content = msg.content || '';
             // 检测是否针对当前用户
             if (myUsername && content.includes(myUsername)) {
-                // 被踢出
+                // 检查消息时间戳，如果是历史消息（超过5秒），则不触发弹窗
+                const now = Date.now();
+                const msgTime = msg.timestamp || 0;
+                if (now - msgTime > 5000) {
+                    // 历史消息，仅显示在聊天窗口
+                    addMessage('system', content);
+                    return;
+                }
+                // 实时消息才触发弹窗
                 if (content.includes('被管理员踢出')) {
                     alert('⛔ 您已被管理员踢出聊天室');
                     forceLogout();
                     return;
                 }
-                // 被封禁
                 if (content.includes('被管理员封禁')) {
                     alert('⛔ 您的账号已被管理员封禁');
                     forceLogout();
