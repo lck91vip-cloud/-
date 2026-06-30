@@ -6,40 +6,17 @@ import time
 import secrets
 import random
 import string
-import smtplib
-from email.mime.text import MIMEText
-from email.header import Header
 from flask import Flask, request, Response, jsonify, stream_with_context, session
 from flask_cors import CORS
-from flask_mail import Mail, Message
 from threading import Thread
 from functools import wraps
 
+# ===== 导入自定义邮件发送模块 =====
+from send_mail import send_verification_email
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
 CORS(app)
-
-# ===== 邮箱配置（SMTP）=====
-# 请替换为你的真实邮箱和授权码
-# ===== 邮箱配置（SMTP）=====
-MAIL_SERVER = 'smtp.163.com'
-MAIL_PORT = 465
-MAIL_USE_SSL = True
-MAIL_USE_TLS = False
-MAIL_USERNAME = 'liaotianshi_01@163.com'   # 改成你的163邮箱
-MAIL_PASSWORD = 'ZWjq5hddxThcL3iw'    # 粘贴授权码，不是邮箱密码
-MAIL_DEFAULT_SENDER = MAIL_USERNAME
-
-app.config.update(
-    MAIL_SERVER=MAIL_SERVER,
-    MAIL_PORT=MAIL_PORT,
-    MAIL_USE_SSL=MAIL_USE_SSL,
-    MAIL_USERNAME=MAIL_USERNAME,
-    MAIL_PASSWORD=MAIL_PASSWORD,
-    MAIL_DEFAULT_SENDER=MAIL_DEFAULT_SENDER
-)
-mail = Mail(app)
 
 # ===== 管理员配置 =====
 ADMIN_USERNAME = 'admin'
@@ -54,11 +31,10 @@ os.makedirs(RECORD_DIR, exist_ok=True)
 USER_DB = os.path.join(KEY_DIR, 'users.db')
 CHAT_DB = os.path.join(RECORD_DIR, 'chat.db')
 
-# ----- 数据库初始化（包含新增表） -----
+# ----- 数据库初始化 -----
 def init_user_db():
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
-    # 用户表（增加 email 列）
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,32 +44,28 @@ def init_user_db():
             salt TEXT NOT NULL
         )
     ''')
-    # 账号封禁表
     c.execute('''
         CREATE TABLE IF NOT EXISTS bans (
             username TEXT PRIMARY KEY,
-            ban_until INTEGER  -- -1 表示永久
+            ban_until INTEGER
         )
     ''')
-    # IP 封禁表
     c.execute('''
         CREATE TABLE IF NOT EXISTS ip_bans (
             ip TEXT PRIMARY KEY,
-            ban_until INTEGER  -- -1 表示永久
+            ban_until INTEGER
         )
     ''')
-    # 违禁词表
     c.execute('''
         CREATE TABLE IF NOT EXISTS banned_words (
             word TEXT PRIMARY KEY
         )
     ''')
-    # 验证码表（新增）
     c.execute('''
         CREATE TABLE IF NOT EXISTS verification_codes (
             email TEXT PRIMARY KEY,
             code TEXT NOT NULL,
-            expiry INTEGER NOT NULL  -- Unix timestamp
+            expiry INTEGER NOT NULL
         )
     ''')
     conn.commit()
@@ -272,7 +244,7 @@ def remove_banned_word(word):
     conn.commit()
     conn.close()
 
-# ----- 验证码管理（新增） -----
+# ----- 验证码管理 -----
 def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
@@ -303,7 +275,6 @@ def delete_verification_code(email):
     conn.close()
 
 def clean_expired_codes():
-    """清理过期的验证码（后台线程调用）"""
     now = int(time.time())
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
@@ -311,7 +282,7 @@ def clean_expired_codes():
     conn.commit()
     conn.close()
 
-# ----- 清理过期封禁（包括账号和 IP）-----
+# ----- 清理过期封禁 -----
 def clean_expired_bans():
     now = int(time.time())
     conn = sqlite3.connect(USER_DB)
@@ -333,7 +304,7 @@ def clean_inactive_users():
         time.sleep(60)
         now = time.time()
         clean_expired_bans()
-        clean_expired_codes()  # 清理过期验证码
+        clean_expired_codes()
         to_remove = []
         for username, info in online_users.items():
             if now - info['last_active'] > 300:
@@ -371,9 +342,7 @@ def index():
     except FileNotFoundError:
         return jsonify({'error': 'index.html not found'}), 404
 
-# ---------- 发送验证码 ----------
-
-
+# ---------- 发送验证码（已改为调用 send_mail.py） ----------
 @app.route('/send_verification', methods=['POST'])
 def send_verification():
     data = request.get_json()
@@ -394,32 +363,13 @@ def send_verification():
     code = generate_verification_code()
     save_verification_code(email, code)
 
-    # 异步发送邮件（使用 smtplib，避免阻塞）
-    def send_email_async():
-        try:
-            # 构建邮件内容
-            subject = '【聊天室】邮箱验证码'
-            body = f'您的验证码是：{code}，有效期为5分钟。请勿转发给他人。'
-
-            msg = MIMEText(body, 'plain', 'utf-8')
-            msg['Subject'] = Header(subject, 'utf-8')
-            msg['From'] = MAIL_USERNAME
-            msg['To'] = email
-
-            # 连接并发送
-            server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT, timeout=10)
-            server.login(MAIL_USERNAME, MAIL_PASSWORD)
-            server.sendmail(MAIL_USERNAME, [email], msg.as_string())
-            server.quit()
-            logger.info(f"验证码邮件已发送至 {email}")
-        except Exception as e:
-            logger.error(f"邮件发送失败 ({email}): {e}")
-            # 邮件失败则删除验证码
-            delete_verification_code(email)
-
-    # 启动线程发送
-    Thread(target=send_email_async, daemon=True).start()
-    return jsonify({'message': '验证码已发送，请查收邮件'}), 200
+    # 调用独立模块发送邮件（同步，立即返回结果）
+    success, message = send_verification_email(email, code)
+    if success:
+        return jsonify({'message': '验证码已发送，请查收邮件'}), 200
+    else:
+        delete_verification_code(email)
+        return jsonify({'error': f'邮件发送失败: {message}'}), 500
 
 # ---------- 邮箱验证注册 ----------
 @app.route('/register_with_email', methods=['POST'])
@@ -433,7 +383,6 @@ def register_with_email():
     if not username or not email or not password or not code:
         return jsonify({'error': '用户名、邮箱、密码和验证码均不能为空'}), 400
 
-    # 检查 IP 封禁
     client_ip = get_client_ip()
     ip_ban = get_ip_ban(client_ip)
     if ip_ban is not None:
@@ -445,44 +394,42 @@ def register_with_email():
         else:
             remove_ip_ban(client_ip)
 
-    # 检查用户名唯一性
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
-    c.execute('SELECT id FROM users WHERE username=?', (username,))
-    if c.fetchone():
-        conn.close()
-        return jsonify({'error': '用户名已存在'}), 409
-    # 检查邮箱唯一性
-    c.execute('SELECT id FROM users WHERE email=?', (email,))
-    if c.fetchone():
-        conn.close()
-        return jsonify({'error': '该邮箱已被注册'}), 409
+    try:
+        c.execute('SELECT id FROM users WHERE username=?', (username,))
+        if c.fetchone():
+            conn.close()
+            return jsonify({'error': '用户名已存在'}), 409
+        c.execute('SELECT id FROM users WHERE email=?', (email,))
+        if c.fetchone():
+            conn.close()
+            return jsonify({'error': '该邮箱已被注册'}), 409
 
-    # 验证验证码
-    stored = get_verification_code(email)
-    if not stored:
-        conn.close()
-        return jsonify({'error': '验证码已过期或不存在，请重新获取'}), 400
-    if stored['code'] != code:
-        conn.close()
-        return jsonify({'error': '验证码错误'}), 400
-    if stored['expiry'] < int(time.time()):
-        conn.close()
+        stored = get_verification_code(email)
+        if not stored:
+            conn.close()
+            return jsonify({'error': '验证码已过期或不存在，请重新获取'}), 400
+        if stored['code'] != code:
+            conn.close()
+            return jsonify({'error': '验证码错误'}), 400
+        if stored['expiry'] < int(time.time()):
+            delete_verification_code(email)
+            conn.close()
+            return jsonify({'error': '验证码已过期，请重新获取'}), 400
+
+        salt, pwd_hash = hash_password(password)
+        c.execute('INSERT INTO users (username, email, password_hash, salt) VALUES (?, ?, ?, ?)',
+                  (username, email, pwd_hash, salt))
+        conn.commit()
         delete_verification_code(email)
-        return jsonify({'error': '验证码已过期，请重新获取'}), 400
+        conn.close()
+        return jsonify({'message': '注册成功'}), 200
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': '注册失败，请稍后重试'}), 500
 
-    # 验证通过，创建用户
-    salt, pwd_hash = hash_password(password)
-    c.execute('INSERT INTO users (username, email, password_hash, salt) VALUES (?, ?, ?, ?)',
-              (username, email, pwd_hash, salt))
-    conn.commit()
-    # 删除验证码
-    delete_verification_code(email)
-    conn.close()
-
-    return jsonify({'message': '注册成功'}), 200
-
-# ---------- 传统登录（用户名+密码）----------
+# ---------- 传统登录 ----------
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -724,7 +671,6 @@ def admin_panel():
         </html>
         '''
 
-    # 管理主界面（新增邮箱列）
     return '''
     <!DOCTYPE html>
     <html>
@@ -808,7 +754,6 @@ def admin_panel():
             <button class="logout-btn" onclick="logout()">退出管理</button>
         </div>
 
-        <!-- 注册用户（新增邮箱列） -->
         <div class="card">
             <h2>👥 注册用户 <span class="badge" id="userCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -819,7 +764,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- 聊天记录 -->
         <div class="card">
             <h2>💬 聊天记录 <span class="badge" id="msgCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -830,7 +774,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- 在线用户 -->
         <div class="card">
             <h2>🟢 在线用户 <span class="badge" id="onlineCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -841,7 +784,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- 账号封禁 -->
         <div class="card">
             <h2>⛔ 账号封禁列表 <span class="badge" id="banCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -852,7 +794,6 @@ def admin_panel():
             </div>
         </div>
 
-        <!-- IP 封禁 -->
         <div class="card">
             <h2>🚫 IP 封禁列表 <span class="badge" id="ipBanCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -862,14 +803,13 @@ def admin_panel():
                 </table>
             </div>
             <div class="add-form">
-                <input type="text" id="newIp" placeholder="输入 IP 地址 (如 192.168.1.1)" />
+                <input type="text" id="newIp" placeholder="输入 IP 地址" />
                 <input type="number" id="ipBanDuration" placeholder="时长(小时)" value="24" min="0" style="width:120px;" />
                 <button class="btn btn-success" onclick="addIpBan()">封禁 IP</button>
                 <span style="font-size:13px;color:#7a8a9e;">（输入 0 表示永久）</span>
             </div>
         </div>
 
-        <!-- 违禁词管理 -->
         <div class="card">
             <h2>🔇 违禁词列表 <span class="badge" id="wordCount">0</span></h2>
             <div style="overflow-x:auto;">
@@ -886,7 +826,6 @@ def admin_panel():
     </div>
 
     <script>
-        // ---------- 工具函数 ----------
         function formatRemainingTime(seconds) {
             if (seconds === -1) return '永久';
             if (seconds <= 0) return '已过期';
@@ -902,9 +841,7 @@ def admin_panel():
             return parts.join('') || '0秒';
         }
 
-        // ---------- 数据获取 ----------
         async function fetchData() {
-            // 用户列表（含邮箱）
             const usersResp = await fetch('/admin/api/users');
             const users = await usersResp.json();
             let usersBody = '';
@@ -921,7 +858,6 @@ def admin_panel():
             document.querySelector('#usersTable tbody').innerHTML = usersBody || `<tr><td colspan="6" class="empty">暂无用户</td></tr>`;
             document.getElementById('userCount').textContent = users.length;
 
-            // 消息列表
             const msgsResp = await fetch('/admin/api/messages');
             const msgs = await msgsResp.json();
             let msgsBody = '';
@@ -939,7 +875,6 @@ def admin_panel():
             document.querySelector('#messagesTable tbody').innerHTML = msgsBody || `<tr><td colspan="6" class="empty">暂无消息</td></tr>`;
             document.getElementById('msgCount').textContent = msgs.length;
 
-            // 在线用户
             const onlineResp = await fetch('/admin/api/online_detail');
             const online = await onlineResp.json();
             let onlineBody = '';
@@ -956,7 +891,6 @@ def admin_panel():
             document.querySelector('#onlineTable tbody').innerHTML = onlineBody || `<tr><td colspan="3" class="empty">当前没有用户在线</td></tr>`;
             document.getElementById('onlineCount').textContent = online.length;
 
-            // 账号封禁
             const bansResp = await fetch('/admin/api/bans');
             const bans = await bansResp.json();
             let bansBody = '';
@@ -971,7 +905,6 @@ def admin_panel():
             document.querySelector('#banTable tbody').innerHTML = bansBody || `<tr><td colspan="3" class="empty">暂无封禁记录</td></tr>`;
             document.getElementById('banCount').textContent = bans.length;
 
-            // IP 封禁
             const ipBansResp = await fetch('/admin/api/ip_bans');
             const ipBans = await ipBansResp.json();
             let ipBansBody = '';
@@ -986,7 +919,6 @@ def admin_panel():
             document.querySelector('#ipBanTable tbody').innerHTML = ipBansBody || `<tr><td colspan="3" class="empty">暂无 IP 封禁</td></tr>`;
             document.getElementById('ipBanCount').textContent = ipBans.length;
 
-            // 违禁词
             const wordsResp = await fetch('/admin/api/banned_words');
             const words = await wordsResp.json();
             let wordsBody = '';
@@ -1000,14 +932,9 @@ def admin_panel():
             document.getElementById('wordCount').textContent = words.length;
         }
 
-        // ---------- 操作函数 ----------
         async function deleteUser(id) {
             if (!confirm('确认删除该用户？此操作不可恢复！')) return;
-            const resp = await fetch('/admin/api/delete_user', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({user_id: id})
-            });
+            const resp = await fetch('/admin/api/delete_user', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({user_id: id}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
@@ -1015,11 +942,7 @@ def admin_panel():
 
         async function deleteMessage(id) {
             if (!confirm('确认删除该消息？')) return;
-            const resp = await fetch('/admin/api/delete_message', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({msg_id: id})
-            });
+            const resp = await fetch('/admin/api/delete_message', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({msg_id: id}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
@@ -1027,11 +950,7 @@ def admin_panel():
 
         async function kickUser(username) {
             if (!confirm(`确认踢出用户 "${username}" ？`)) return;
-            const resp = await fetch('/admin/api/kick', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username})
-            });
+            const resp = await fetch('/admin/api/kick', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
@@ -1041,16 +960,9 @@ def admin_panel():
             const hours = prompt(`输入封禁时长（小时），输入 0 表示永久封禁：`, '24');
             if (hours === null) return;
             const duration = parseInt(hours);
-            if (isNaN(duration) || duration < 0) {
-                alert('请输入有效的数字（≥0）');
-                return;
-            }
+            if (isNaN(duration) || duration < 0) { alert('请输入有效的数字（≥0）'); return; }
             if (!confirm(`确认封禁用户 "${username}" ${duration === 0 ? '永久' : duration + ' 小时'} ？`)) return;
-            const resp = await fetch('/admin/api/ban', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username, duration})
-            });
+            const resp = await fetch('/admin/api/ban', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username, duration}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
@@ -1058,28 +970,19 @@ def admin_panel():
 
         async function unbanUser(username) {
             if (!confirm(`确认解封用户 "${username}" ？`)) return;
-            const resp = await fetch('/admin/api/unban', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username})
-            });
+            const resp = await fetch('/admin/api/unban', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
         }
 
-        // IP 封禁
         async function addIpBan() {
             const ip = document.getElementById('newIp').value.trim();
             const duration = parseInt(document.getElementById('ipBanDuration').value);
             if (!ip) { alert('请输入 IP 地址'); return; }
             if (isNaN(duration) || duration < 0) { alert('请输入有效的时长（≥0）'); return; }
             if (!confirm(`确认封禁 IP "${ip}" ${duration === 0 ? '永久' : duration + ' 小时'} ？`)) return;
-            const resp = await fetch('/admin/api/ban_ip', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ip, duration})
-            });
+            const resp = await fetch('/admin/api/ban_ip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ip, duration}) });
             const data = await resp.json();
             alert(data.message || data.error);
             document.getElementById('newIp').value = '';
@@ -1088,40 +991,24 @@ def admin_panel():
 
         async function unbanIp(ip) {
             if (!confirm(`确认解封 IP "${ip}" ？`)) return;
-            const resp = await fetch('/admin/api/unban_ip', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ip})
-            });
+            const resp = await fetch('/admin/api/unban_ip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ip}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
         }
 
-        // 违禁词
         async function addWord() {
             const word = document.getElementById('newWord').value.trim();
             if (!word) { alert('请输入违禁词'); return; }
-            const resp = await fetch('/admin/api/add_banned_word', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({word})
-            });
+            const resp = await fetch('/admin/api/add_banned_word', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({word}) });
             const data = await resp.json();
             alert(data.message || data.error);
-            if (resp.ok) {
-                document.getElementById('newWord').value = '';
-                fetchData();
-            }
+            if (resp.ok) { document.getElementById('newWord').value = ''; fetchData(); }
         }
 
         async function removeWord(word) {
             if (!confirm(`确认删除违禁词 "${word}" ？`)) return;
-            const resp = await fetch('/admin/api/remove_banned_word', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({word})
-            });
+            const resp = await fetch('/admin/api/remove_banned_word', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({word}) });
             const data = await resp.json();
             alert(data.message || data.error);
             fetchData();
@@ -1139,7 +1026,7 @@ def admin_panel():
     </html>
     '''
 
-# ----- 管理员 API（新增邮箱字段）-----
+# ----- 管理员 API -----
 @app.route('/admin/api/users')
 @admin_required
 def admin_users():
@@ -1260,7 +1147,6 @@ def admin_bans():
                 b['remaining'] = '已过期（可解封）'
     return jsonify(bans), 200
 
-# IP 封禁 API
 @app.route('/admin/api/ip_bans', methods=['GET'])
 @admin_required
 def admin_ip_bans():
@@ -1317,7 +1203,6 @@ def admin_unban_ip():
     remove_ip_ban(ip)
     return jsonify({'message': f'IP {ip} 已解封'}), 200
 
-# 违禁词 API
 @app.route('/admin/api/banned_words', methods=['GET'])
 @admin_required
 def admin_banned_words():
