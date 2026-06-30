@@ -6,11 +6,15 @@ import time
 import secrets
 import random
 import string
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
 from flask import Flask, request, Response, jsonify, stream_with_context, session
 from flask_cors import CORS
 from flask_mail import Mail, Message
 from threading import Thread
 from functools import wraps
+
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
@@ -368,6 +372,8 @@ def index():
         return jsonify({'error': 'index.html not found'}), 404
 
 # ---------- 发送验证码 ----------
+
+
 @app.route('/send_verification', methods=['POST'])
 def send_verification():
     data = request.get_json()
@@ -388,17 +394,32 @@ def send_verification():
     code = generate_verification_code()
     save_verification_code(email, code)
 
-    # 发送邮件
-    try:
-        msg = Message('【聊天室】邮箱验证码',
-                      recipients=[email])
-        msg.body = f'您的验证码是：{code}，有效期为5分钟。请勿转发给他人。'
-        mail.send(msg)
-        return jsonify({'message': '验证码已发送，请查收邮件'}), 200
-    except Exception as e:
-        # 如果邮件发送失败，删除已存储的验证码
-        delete_verification_code(email)
-        return jsonify({'error': f'邮件发送失败: {str(e)}'}), 500
+    # 异步发送邮件（使用 smtplib，避免阻塞）
+    def send_email_async():
+        try:
+            # 构建邮件内容
+            subject = '【聊天室】邮箱验证码'
+            body = f'您的验证码是：{code}，有效期为5分钟。请勿转发给他人。'
+
+            msg = MIMEText(body, 'plain', 'utf-8')
+            msg['Subject'] = Header(subject, 'utf-8')
+            msg['From'] = MAIL_USERNAME
+            msg['To'] = email
+
+            # 连接并发送
+            server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT, timeout=10)
+            server.login(MAIL_USERNAME, MAIL_PASSWORD)
+            server.sendmail(MAIL_USERNAME, [email], msg.as_string())
+            server.quit()
+            logger.info(f"验证码邮件已发送至 {email}")
+        except Exception as e:
+            logger.error(f"邮件发送失败 ({email}): {e}")
+            # 邮件失败则删除验证码
+            delete_verification_code(email)
+
+    # 启动线程发送
+    Thread(target=send_email_async, daemon=True).start()
+    return jsonify({'message': '验证码已发送，请查收邮件'}), 200
 
 # ---------- 邮箱验证注册 ----------
 @app.route('/register_with_email', methods=['POST'])
