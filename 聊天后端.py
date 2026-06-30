@@ -20,7 +20,7 @@ CORS(app)
 
 # ===== 管理员配置 =====
 ADMIN_USERNAME = 'admin'
-ADMIN_PASSWORD = 'admin123'  # 请立即修改为强密码！
+ADMIN_PASSWORD = 'admin123'  # 请修改！
 
 BASE_DIR = './liaotian'
 KEY_DIR = os.path.join(BASE_DIR, 'key')
@@ -35,54 +35,29 @@ CHAT_DB = os.path.join(RECORD_DIR, 'chat.db')
 def init_user_db():
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS bans (
-            username TEXT PRIMARY KEY,
-            ban_until INTEGER
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS ip_bans (
-            ip TEXT PRIMARY KEY,
-            ban_until INTEGER
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS banned_words (
-            word TEXT PRIMARY KEY
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS verification_codes (
-            email TEXT PRIMARY KEY,
-            code TEXT NOT NULL,
-            expiry INTEGER NOT NULL
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS bans (username TEXT PRIMARY KEY, ban_until INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS ip_bans (ip TEXT PRIMARY KEY, ban_until INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS banned_words (word TEXT PRIMARY KEY)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS verification_codes (
+        email TEXT PRIMARY KEY, code TEXT NOT NULL, expiry INTEGER NOT NULL)''')
     conn.commit()
     conn.close()
 
 def init_chat_db():
     conn = sqlite3.connect(CHAT_DB)
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,
-            nickname TEXT NOT NULL,
-            content TEXT,
-            timestamp INTEGER NOT NULL
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        content TEXT,
+        timestamp INTEGER NOT NULL)''')
     conn.commit()
     conn.close()
 
@@ -98,7 +73,6 @@ def hash_password(password):
 def verify_password(password, salt, stored_hash):
     return hashlib.sha256((salt + password).encode()).hexdigest() == stored_hash
 
-# ----- 获取真实客户端 IP -----
 def get_client_ip():
     xff = request.headers.get('X-Forwarded-For')
     if xff:
@@ -110,10 +84,9 @@ def get_client_ip():
         return xri.strip()
     return request.remote_addr
 
-# ----- 在线用户管理 -----
 online_users = {}  # username -> {'ip': ip, 'last_active': timestamp}
 
-# ----- 消息存储 -----
+# ----- 消息存储（返回 id 和 timestamp）-----
 def save_message(msg_type, nickname, content=None):
     conn = sqlite3.connect(CHAT_DB)
     c = conn.cursor()
@@ -121,8 +94,9 @@ def save_message(msg_type, nickname, content=None):
     c.execute('INSERT INTO messages (type, nickname, content, timestamp) VALUES (?, ?, ?, ?)',
               (msg_type, nickname, content, ts))
     conn.commit()
+    msg_id = c.lastrowid
     conn.close()
-    return ts
+    return msg_id, ts
 
 def get_all_messages():
     conn = sqlite3.connect(CHAT_DB)
@@ -154,7 +128,7 @@ def delete_message(msg_id):
     conn.commit()
     conn.close()
 
-# ----- 封禁管理（账号） -----
+# ----- 封禁管理 -----
 def get_ban(username):
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
@@ -185,7 +159,6 @@ def get_all_bans():
     conn.close()
     return [{'username': r[0], 'ban_until': r[1]} for r in rows]
 
-# ----- IP 封禁管理 -----
 def get_ip_ban(ip):
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
@@ -216,7 +189,6 @@ def get_all_ip_bans():
     conn.close()
     return [{'ip': r[0], 'ban_until': r[1]} for r in rows]
 
-# ----- 违禁词管理 -----
 def get_banned_words():
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
@@ -244,12 +216,11 @@ def remove_banned_word(word):
     conn.commit()
     conn.close()
 
-# ----- 验证码管理 -----
 def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def save_verification_code(email, code):
-    expiry = int(time.time()) + 300  # 5分钟有效期
+    expiry = int(time.time()) + 300
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     c.execute('REPLACE INTO verification_codes (email, code, expiry) VALUES (?, ?, ?)',
@@ -282,7 +253,6 @@ def clean_expired_codes():
     conn.commit()
     conn.close()
 
-# ----- 清理过期封禁 -----
 def clean_expired_bans():
     now = int(time.time())
     conn = sqlite3.connect(USER_DB)
@@ -292,7 +262,6 @@ def clean_expired_bans():
     conn.commit()
     conn.close()
 
-# ----- 消息队列 & 广播 -----
 pending_messages = []
 
 def broadcast_message(msg):
@@ -311,16 +280,17 @@ def clean_inactive_users():
                 to_remove.append(username)
         for username in to_remove:
             del online_users[username]
-            save_message('system', username, f'🚶 {username} 超时离开聊天室')
+            msg_id, ts = save_message('system', username, f'🚶 {username} 超时离开聊天室')
             broadcast_message({
+                'id': msg_id,
                 'type': 'system',
+                'nickname': username,
                 'content': f'🚶 {username} 超时离开聊天室',
-                'timestamp': int(time.time() * 1000)
+                'timestamp': ts
             })
 
 Thread(target=clean_inactive_users, daemon=True).start()
 
-# ----- 管理员认证装饰器 -----
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -342,15 +312,12 @@ def index():
     except FileNotFoundError:
         return jsonify({'error': 'index.html not found'}), 404
 
-# ---------- 发送验证码（已改为调用 send_mail.py） ----------
 @app.route('/send_verification', methods=['POST'])
 def send_verification():
     data = request.get_json()
     email = data.get('email')
     if not email:
         return jsonify({'error': '邮箱不能为空'}), 400
-
-    # 检查邮箱是否已被注册
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     c.execute('SELECT id FROM users WHERE email=?', (email,))
@@ -358,12 +325,8 @@ def send_verification():
         conn.close()
         return jsonify({'error': '该邮箱已被注册'}), 409
     conn.close()
-
-    # 生成验证码
     code = generate_verification_code()
     save_verification_code(email, code)
-
-    # 调用独立模块发送邮件（同步，立即返回结果）
     success, message = send_verification_email(email, code)
     if success:
         return jsonify({'message': '验证码已发送，请查收邮件'}), 200
@@ -371,7 +334,6 @@ def send_verification():
         delete_verification_code(email)
         return jsonify({'error': f'邮件发送失败: {message}'}), 500
 
-# ---------- 邮箱验证注册 ----------
 @app.route('/register_with_email', methods=['POST'])
 def register_with_email():
     data = request.get_json()
@@ -379,10 +341,8 @@ def register_with_email():
     email = data.get('email')
     password = data.get('password')
     code = data.get('code')
-
     if not username or not email or not password or not code:
         return jsonify({'error': '用户名、邮箱、密码和验证码均不能为空'}), 400
-
     client_ip = get_client_ip()
     ip_ban = get_ip_ban(client_ip)
     if ip_ban is not None:
@@ -393,7 +353,6 @@ def register_with_email():
             return jsonify({'error': f'您的 IP 已被封禁，剩余 {remaining} 小时，无法注册'}), 403
         else:
             remove_ip_ban(client_ip)
-
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     try:
@@ -405,7 +364,6 @@ def register_with_email():
         if c.fetchone():
             conn.close()
             return jsonify({'error': '该邮箱已被注册'}), 409
-
         stored = get_verification_code(email)
         if not stored:
             conn.close()
@@ -417,7 +375,6 @@ def register_with_email():
             delete_verification_code(email)
             conn.close()
             return jsonify({'error': '验证码已过期，请重新获取'}), 400
-
         salt, pwd_hash = hash_password(password)
         c.execute('INSERT INTO users (username, email, password_hash, salt) VALUES (?, ?, ?, ?)',
                   (username, email, pwd_hash, salt))
@@ -429,7 +386,6 @@ def register_with_email():
         conn.close()
         return jsonify({'error': '注册失败，请稍后重试'}), 500
 
-# ---------- 传统登录 ----------
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -437,7 +393,6 @@ def login():
     password = data.get('password')
     if not username or not password:
         return jsonify({'error': '用户名和密码必填'}), 400
-
     client_ip = get_client_ip()
     ip_ban = get_ip_ban(client_ip)
     if ip_ban is not None:
@@ -448,7 +403,6 @@ def login():
             return jsonify({'error': f'您的 IP 已被封禁，剩余 {remaining} 小时'}), 403
         else:
             remove_ip_ban(client_ip)
-
     conn = sqlite3.connect(USER_DB)
     c = conn.cursor()
     c.execute('SELECT password_hash, salt FROM users WHERE username=?', (username,))
@@ -459,7 +413,6 @@ def login():
     stored_hash, salt = row
     if not verify_password(password, salt, stored_hash):
         return jsonify({'error': '用户名或密码错误'}), 401
-
     ban_until = get_ban(username)
     if ban_until is not None:
         if ban_until == -1:
@@ -469,18 +422,18 @@ def login():
             return jsonify({'error': f'该账号已被封禁，剩余 {remaining} 小时'}), 403
         else:
             remove_ban(username)
-
     now = time.time()
     is_new = username not in online_users
     online_users[username] = {'ip': client_ip, 'last_active': now}
     if is_new:
-        save_message('system', username, f'👋 {username} 加入了聊天室')
+        msg_id, ts = save_message('system', username, f'👋 {username} 加入了聊天室')
         broadcast_message({
+            'id': msg_id,
             'type': 'system',
+            'nickname': username,
             'content': f'👋 {username} 加入了聊天室',
-            'timestamp': int(now * 1000)
+            'timestamp': ts
         })
-
     return jsonify({
         'message': '登录成功',
         'username': username,
@@ -502,11 +455,13 @@ def logout():
     username = data.get('username')
     if username in online_users:
         del online_users[username]
-        save_message('system', username, f'🚶 {username} 离开了聊天室')
+        msg_id, ts = save_message('system', username, f'🚶 {username} 离开了聊天室')
         broadcast_message({
+            'id': msg_id,
             'type': 'system',
+            'nickname': username,
             'content': f'🚶 {username} 离开了聊天室',
-            'timestamp': int(time.time() * 1000)
+            'timestamp': ts
         })
         return jsonify({'message': '已退出'}), 200
     return jsonify({'error': '未登录'}), 401
@@ -520,7 +475,6 @@ def send_message():
         return jsonify({'error': '缺少参数'}), 400
     if username not in online_users:
         return jsonify({'error': '未登录或账号不一致'}), 401
-
     banned_words = get_banned_words()
     filtered_content = content
     for word in banned_words:
@@ -528,9 +482,9 @@ def send_message():
             filtered_content = filtered_content.replace(word, '*')
     if filtered_content.strip() == '':
         filtered_content = '*'
-
-    ts = save_message('message', username, filtered_content)
+    msg_id, ts = save_message('message', username, filtered_content)
     broadcast_message({
+        'id': msg_id,
         'type': 'message',
         'nickname': username,
         'content': filtered_content,
@@ -541,29 +495,32 @@ def send_message():
 
 @app.route('/stream')
 def stream():
-    all_msgs = get_all_messages()
-    msgs_for_stream = [{'type': m['type'], 'nickname': m['nickname'], 'content': m['content'], 'timestamp': m['timestamp']} for m in all_msgs[-50:]]
+    last_id = request.args.get('last_id', default=0, type=int)
+    conn = sqlite3.connect(CHAT_DB)
+    c = conn.cursor()
+    c.execute('SELECT id, type, nickname, content, timestamp FROM messages WHERE id > ? ORDER BY id LIMIT 100', (last_id,))
+    rows = c.fetchall()
+    conn.close()
+    history = [{'id': r[0], 'type': r[1], 'nickname': r[2], 'content': r[3], 'timestamp': r[4]} for r in rows]
+    current_max_id = history[-1]['id'] if history else last_id
     def event_stream():
-        for msg in msgs_for_stream:
+        for msg in history:
             yield f"data: {json.dumps(msg)}\n\n"
-        last_id = len(all_msgs)
+        last_sent_id = current_max_id
         while True:
             time.sleep(0.5)
             conn = sqlite3.connect(CHAT_DB)
             c = conn.cursor()
-            c.execute('SELECT COUNT(*) FROM messages')
-            count = c.fetchone()[0]
+            c.execute('SELECT id, type, nickname, content, timestamp FROM messages WHERE id > ? ORDER BY id', (last_sent_id,))
+            new_rows = c.fetchall()
             conn.close()
-            if count > last_id:
-                conn = sqlite3.connect(CHAT_DB)
-                c = conn.cursor()
-                c.execute('SELECT id, type, nickname, content, timestamp FROM messages WHERE id > ?', (last_id,))
-                new_rows = c.fetchall()
-                conn.close()
+            if new_rows:
                 for r in new_rows:
-                    msg = {'type': r[1], 'nickname': r[2], 'content': r[3], 'timestamp': r[4]}
+                    msg = {'id': r[0], 'type': r[1], 'nickname': r[2], 'content': r[3], 'timestamp': r[4]}
                     yield f"data: {json.dumps(msg)}\n\n"
-                last_id = count
+                last_sent_id = new_rows[-1][0]
+            else:
+                yield f": heartbeat\n\n"
     return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route('/users', methods=['GET'])
@@ -576,7 +533,7 @@ def get_messages_public():
     return jsonify([{'type': m['type'], 'nickname': m['nickname'], 'content': m['content'], 'timestamp': m['timestamp']} for m in msgs]), 200
 
 # ============================================================
-#  管理员后台
+#  管理员后台（HTML 界面）
 # ============================================================
 
 @app.route('/admin/login', methods=['POST'])
@@ -1081,11 +1038,13 @@ def admin_kick():
         return jsonify({'error': '不能踢出管理员'}), 403
     if username in online_users:
         del online_users[username]
-        save_message('system', '管理员', f'👢 {username} 被管理员踢出')
+        msg_id, ts = save_message('system', '管理员', f'👢 {username} 被管理员踢出')
         broadcast_message({
+            'id': msg_id,
             'type': 'system',
+            'nickname': '管理员',
             'content': f'👢 {username} 被管理员踢出',
-            'timestamp': int(time.time() * 1000)
+            'timestamp': ts
         })
         return jsonify({'message': '用户已踢出'}), 200
     return jsonify({'error': '用户不在线'}), 404
@@ -1102,11 +1061,13 @@ def admin_ban():
         return jsonify({'error': '不能封禁管理员'}), 403
     if username in online_users:
         del online_users[username]
-        save_message('system', '管理员', f'⛔ {username} 被管理员封禁')
+        msg_id, ts = save_message('system', '管理员', f'⛔ {username} 被管理员封禁')
         broadcast_message({
+            'id': msg_id,
             'type': 'system',
+            'nickname': '管理员',
             'content': f'⛔ {username} 被管理员封禁',
-            'timestamp': int(time.time() * 1000)
+            'timestamp': ts
         })
     if duration == 0:
         ban_until = -1
@@ -1185,11 +1146,13 @@ def admin_ban_ip():
     to_kick = [u for u, info in online_users.items() if info['ip'] == ip]
     for u in to_kick:
         del online_users[u]
-        save_message('system', '管理员', f'👢 {u} 被管理员踢出（IP 封禁）')
+        msg_id, ts = save_message('system', '管理员', f'👢 {u} 被管理员踢出（IP 封禁）')
         broadcast_message({
+            'id': msg_id,
             'type': 'system',
+            'nickname': '管理员',
             'content': f'👢 {u} 被管理员踢出（IP 封禁）',
-            'timestamp': int(time.time() * 1000)
+            'timestamp': ts
         })
     return jsonify({'message': f'IP {ip} 已{msg}'}), 200
 
