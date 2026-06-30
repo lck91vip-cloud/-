@@ -125,8 +125,31 @@
             color: #9aabbf;
             margin-top: 8px;
         }
+        .verification-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .verification-row input {
+            flex: 1;
+        }
+        .verification-row button {
+            white-space: nowrap;
+            padding: 10px 16px;
+            background: #2d7aff;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-weight: 500;
+            height: 44px;
+        }
+        .verification-row button:hover { background: #1a5fd9; }
+        .verification-row button:disabled { background: #b0c4dd; cursor: not-allowed; }
 
-        /* ===== 主聊天界面 ===== */
+        /* ===== 主聊天界面（与之前完全相同） ===== */
         .chat-app {
             width: 100%;
             max-width: 1100px;
@@ -139,8 +162,7 @@
             overflow: hidden;
             position: relative;
         }
-
-        /* 左侧用户列表 */
+        /* 侧边栏 */
         .sidebar {
             width: 240px;
             background: #f7f9fc;
@@ -211,7 +233,6 @@
             color: #9aabbf;
             font-size: 14px;
         }
-
         /* 右侧主区域 */
         .main {
             flex: 1;
@@ -272,7 +293,6 @@
             background:#ef5350;
             color:#fff;
         }
-
         .message-area {
             flex: 1;
             overflow-y: auto;
@@ -283,7 +303,6 @@
         }
         .message-area::-webkit-scrollbar { width: 5px; }
         .message-area::-webkit-scrollbar-thumb { background: #d0d8e3; border-radius: 8px; }
-
         .message {
             display: flex;
             flex-direction: column;
@@ -335,7 +354,6 @@
             text-align: right;
         }
         .message.self .bubble .time { color: rgba(255,255,255,0.7); }
-
         .system-message {
             align-self: center;
             max-width: 90%;
@@ -350,7 +368,6 @@
             line-height: 1.8;
         }
         .system-message .highlight { color: #2d7aff; font-weight: 500; }
-
         .input-area {
             padding: 12px 20px 18px;
             border-top: 1px solid #eef2f7;
@@ -407,7 +424,6 @@
         .input-area .btn-send:hover { background: #1a5fd9; }
         .input-area .btn-send:active { transform: scale(0.96); }
         .input-area .btn-send:disabled { background: #b0c4dd; cursor: not-allowed; }
-
         /* 响应式 */
         @media (max-width:720px) {
             .chat-app { height:100vh; max-height:100vh; border-radius:0; padding:0; }
@@ -447,21 +463,48 @@
     <div class="modal-box">
         <h2 id="authTitle">🔐 登录</h2>
         <div id="authSub" class="sub">已有账号直接登录，新用户请注册</div>
-        <div class="form-group">
-            <label>👤 用户名</label>
-            <input type="text" id="usernameInput" placeholder="请输入用户名" maxlength="20" />
+
+        <!-- 登录模式（默认显示用户名+密码） -->
+        <div id="loginFields">
+            <div class="form-group">
+                <label>👤 用户名</label>
+                <input type="text" id="usernameInput" placeholder="请输入用户名" maxlength="20" />
+            </div>
+            <div class="form-group">
+                <label>🔑 密码</label>
+                <input type="password" id="passwordInput" placeholder="请输入密码" maxlength="30" />
+            </div>
         </div>
-        <div class="form-group">
-            <label>🔑 密码</label>
-            <input type="password" id="passwordInput" placeholder="请输入密码" maxlength="30" />
+
+        <!-- 注册模式（新增邮箱和验证码） -->
+        <div id="registerFields" style="display:none;">
+            <div class="form-group">
+                <label>👤 用户名</label>
+                <input type="text" id="regUsernameInput" placeholder="请输入用户名" maxlength="20" />
+            </div>
+            <div class="form-group">
+                <label>📧 邮箱</label>
+                <input type="email" id="emailInput" placeholder="请输入邮箱" />
+            </div>
+            <div class="form-group">
+                <label>🔑 密码</label>
+                <input type="password" id="regPasswordInput" placeholder="请输入密码" maxlength="30" />
+            </div>
+            <div class="form-group">
+                <label>📨 验证码</label>
+                <div class="verification-row">
+                    <input type="text" id="codeInput" placeholder="请输入6位验证码" maxlength="6" />
+                    <button id="btnSendCode">获取验证码</button>
+                </div>
+            </div>
         </div>
-        <!-- 移除 IP 和端口输入框，使用固定服务器地址 -->
-        <div class="server-info">🌐 连接服务器：<span id="serverDisplay">reseau.proxy.rlwy.net</span></div>
+
         <button class="btn-connect" id="btnAuth">🔗 登录</button>
         <div class="error-msg" id="authError"></div>
         <div class="toggle-link">
             <span id="toggleAuthLink">还没有账号？立即注册</span>
         </div>
+        <div class="server-info">🌐 连接服务器：<span id="serverDisplay">reseau.proxy.rlwy.net</span></div>
     </div>
 </div>
 
@@ -501,7 +544,7 @@
 
 <script>
     // ============================================================
-    //  固定服务器地址（修改这里即可更换域名）
+    //  固定服务器地址
     // ============================================================
     const SERVER_URL = 'http://reseau.proxy.rlwy.net:31098';
 
@@ -537,8 +580,18 @@
     const authModal = document.getElementById('authModal');
     const authTitle = document.getElementById('authTitle');
     const authSub = document.getElementById('authSub');
+    // 登录字段
     const usernameInput = document.getElementById('usernameInput');
     const passwordInput = document.getElementById('passwordInput');
+    // 注册字段
+    const regUsernameInput = document.getElementById('regUsernameInput');
+    const emailInput = document.getElementById('emailInput');
+    const regPasswordInput = document.getElementById('regPasswordInput');
+    const codeInput = document.getElementById('codeInput');
+    const btnSendCode = document.getElementById('btnSendCode');
+    const loginFields = document.getElementById('loginFields');
+    const registerFields = document.getElementById('registerFields');
+
     const btnAuth = document.getElementById('btnAuth');
     const authError = document.getElementById('authError');
     const toggleAuthLink = document.getElementById('toggleAuthLink');
@@ -555,7 +608,6 @@
     const statusText = document.getElementById('statusText');
     const btnLogout = document.getElementById('btnLogout');
 
-    // 显示固定服务器地址
     serverDisplay.textContent = SERVER_URL.replace(/^https?:\/\//, '');
 
     // ============================================================
@@ -564,11 +616,13 @@
     let myUsername = '';
     let isLoginMode = true; // true=登录, false=注册
     let eventSource = null;
-    let reconnectTimer = null; // 定时器句柄
-    let isReconnecting = false; // 防止重复重连
+    let reconnectTimer = null;
+    let isReconnecting = false;
+    let codeTimer = null;
+    let codeCountdown = 0;
 
     // ============================================================
-    //  存储凭据（直接存 JSON，支持中文）
+    //  存储凭据
     // ============================================================
     function saveCredentials(username, password) {
         localStorage.setItem('chat_credentials', JSON.stringify({ username, password }));
@@ -598,25 +652,89 @@
             authSub.textContent = '已有账号直接登录，新用户请注册';
             btnAuth.textContent = '🔗 登录';
             toggleAuthLink.textContent = '还没有账号？立即注册';
+            loginFields.style.display = 'block';
+            registerFields.style.display = 'none';
+            // 清空注册相关错误
+            authError.textContent = '';
         } else {
             authTitle.textContent = '📝 注册';
-            authSub.textContent = '创建一个新账号';
+            authSub.textContent = '请填写信息并通过邮箱验证';
             btnAuth.textContent = '✏️ 注册';
             toggleAuthLink.textContent = '已有账号？去登录';
+            loginFields.style.display = 'none';
+            registerFields.style.display = 'block';
+            authError.textContent = '';
         }
-        authError.textContent = '';
+    });
+
+    // ============================================================
+    //  发送验证码
+    // ============================================================
+    btnSendCode.addEventListener('click', async () => {
+        const email = emailInput.value.trim();
+        if (!email) {
+            alert('请先输入邮箱');
+            return;
+        }
+        // 简单邮箱格式校验
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            alert('请输入有效的邮箱地址');
+            return;
+        }
+        btnSendCode.disabled = true;
+        btnSendCode.textContent = '发送中...';
+        try {
+            const resp = await fetch(SERVER_URL + '/send_verification', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                alert('✅ 验证码已发送，请查收邮件');
+                // 开始倒计时（60秒）
+                codeCountdown = 60;
+                btnSendCode.textContent = `${codeCountdown}s`;
+                if (codeTimer) clearInterval(codeTimer);
+                codeTimer = setInterval(() => {
+                    codeCountdown--;
+                    if (codeCountdown <= 0) {
+                        clearInterval(codeTimer);
+                        codeTimer = null;
+                        btnSendCode.textContent = '获取验证码';
+                        btnSendCode.disabled = false;
+                    } else {
+                        btnSendCode.textContent = `${codeCountdown}s`;
+                    }
+                }, 1000);
+            } else {
+                alert('❌ ' + (data.error || '发送失败'));
+                btnSendCode.textContent = '获取验证码';
+                btnSendCode.disabled = false;
+            }
+        } catch (e) {
+            alert('❌ 网络错误，请稍后再试');
+            btnSendCode.textContent = '获取验证码';
+            btnSendCode.disabled = false;
+        }
     });
 
     // ============================================================
     //  认证请求（登录/注册）
     // ============================================================
-    async function authRequest(isLogin, username, password) {
-        const endpoint = isLogin ? '/login' : '/register';
-        const url = SERVER_URL + endpoint;
+    async function authRequest(isLogin, username, password, email, code) {
+        let url, body;
+        if (isLogin) {
+            url = SERVER_URL + '/login';
+            body = { username, password };
+        } else {
+            url = SERVER_URL + '/register_with_email';
+            body = { username, email, password, code };
+        }
         const resp = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify(body)
         });
         const data = await resp.json();
         if (!resp.ok) {
@@ -630,13 +748,10 @@
     // ============================================================
     function initChat(username) {
         myUsername = username;
-
-        // 隐藏认证界面，显示聊天
         authModal.style.display = 'none';
         chatApp.style.display = 'flex';
         setConnectionStatus(true);
 
-        // 建立 SSE 连接
         if (eventSource) eventSource.close();
         const streamUrl = SERVER_URL + '/stream';
         eventSource = new EventSource(streamUrl);
@@ -653,35 +768,27 @@
         eventSource.onerror = (e) => {
             console.warn('SSE 连接出错', e);
             setConnectionStatus(false);
-            // 启动重连机制
             startReconnect();
         };
 
-        // 请求当前在线用户列表
         fetchUsers();
-
-        // 停止重连定时器（如果正在重连）
         stopReconnect();
         isReconnecting = false;
     }
 
     // ============================================================
-    //  处理服务器推送的消息（增加历史消息判断）
+    //  处理服务器推送的消息
     // ============================================================
     function handleServerMessage(msg) {
         if (msg.type === 'system') {
             const content = msg.content || '';
-            // 检测是否针对当前用户
             if (myUsername && content.includes(myUsername)) {
-                // 检查消息时间戳，如果是历史消息（超过5秒），则不触发弹窗
                 const now = Date.now();
                 const msgTime = msg.timestamp || 0;
                 if (now - msgTime > 5000) {
-                    // 历史消息，仅显示在聊天窗口
                     addMessage('system', content);
                     return;
                 }
-                // 实时消息才触发弹窗
                 if (content.includes('被管理员踢出')) {
                     alert('⛔ 您已被管理员踢出聊天室');
                     forceLogout();
@@ -707,7 +814,6 @@
         }
     }
 
-    // ---------- 强制退出（清除状态，跳转到登录页） ----------
     function forceLogout() {
         if (eventSource) {
             eventSource.close();
@@ -725,6 +831,10 @@
         onlineBadge.textContent = '● 0 在线';
         usernameInput.value = '';
         passwordInput.value = '';
+        regUsernameInput.value = '';
+        emailInput.value = '';
+        regPasswordInput.value = '';
+        codeInput.value = '';
         authError.textContent = '';
         if (!isLoginMode) {
             toggleAuthLink.click(); // 恢复登录模式
@@ -843,7 +953,6 @@
             if (!resp.ok) {
                 const err = await resp.json();
                 console.warn('发送失败', err);
-                // 如果发送失败（可能断线），触发重连
                 setConnectionStatus(false);
                 startReconnect();
             } else {
@@ -861,10 +970,8 @@
     //  退出登录
     // ============================================================
     async function logout() {
-        // 停止重连
         stopReconnect();
         isReconnecting = false;
-
         if (myUsername) {
             try {
                 await fetch(SERVER_URL + '/logout', {
@@ -882,24 +989,25 @@
         chatApp.style.display = 'none';
         authModal.style.display = 'flex';
         setConnectionStatus(false);
-        // 清空消息
         messageArea.innerHTML = '';
         userList.innerHTML = '<div class="empty-users">暂无其他用户在线</div>';
         onlineCount.textContent = '0';
         onlineBadge.textContent = '● 0 在线';
         usernameInput.value = '';
         passwordInput.value = '';
+        regUsernameInput.value = '';
+        emailInput.value = '';
+        regPasswordInput.value = '';
+        codeInput.value = '';
         authError.textContent = '';
-        // 恢复登录模式
         if (!isLoginMode) {
-            toggleAuthLink.click(); // 切换回登录
+            toggleAuthLink.click();
         }
-        // 清除保存的凭据
         clearCredentials();
     }
 
     // ============================================================
-    //  重连机制（每秒尝试一次）
+    //  重连机制
     // ============================================================
     function startReconnect() {
         if (isReconnecting) return;
@@ -907,27 +1015,21 @@
         console.log('🔄 启动重连定时器（每秒一次）');
         reconnectTimer = setInterval(async () => {
             console.log('🔄 尝试重连...');
-            // 尝试使用保存的凭据重新登录
             const cred = getCredentials();
             if (!cred) {
-                // 没有凭据，停止重连并退出登录
                 stopReconnect();
                 isReconnecting = false;
                 if (!myUsername) {
-                    // 如果未登录，显示登录界面
                     authModal.style.display = 'flex';
                     chatApp.style.display = 'none';
                 }
                 return;
             }
             try {
-                // 尝试重新登录
                 const data = await authRequest(true, cred.username, cred.password);
                 if (data.message === '登录成功') {
                     console.log('✅ 重连成功');
-                    // 重新初始化聊天
                     initChat(cred.username);
-                    // 停止重连
                     stopReconnect();
                     isReconnecting = false;
                 } else {
@@ -951,39 +1053,53 @@
     //  认证按钮事件
     // ============================================================
     btnAuth.addEventListener('click', async () => {
-        const username = usernameInput.value.trim();
-        const password = passwordInput.value.trim();
-
-        if (!username) { authError.textContent = '请输入用户名'; return; }
-        if (!password) { authError.textContent = '请输入密码'; return; }
-
-        authError.textContent = '';
-        btnAuth.disabled = true;
-        btnAuth.textContent = '处理中…';
-
-        try {
-            const data = await authRequest(isLoginMode, username, password);
-            if (isLoginMode) {
-                // 登录成功
+        if (isLoginMode) {
+            // 登录逻辑
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (!username) { authError.textContent = '请输入用户名'; return; }
+            if (!password) { authError.textContent = '请输入密码'; return; }
+            authError.textContent = '';
+            btnAuth.disabled = true;
+            btnAuth.textContent = '处理中…';
+            try {
+                const data = await authRequest(true, username, password);
                 saveCredentials(username, password);
                 initChat(username);
-            } else {
-                // 注册成功，自动切换登录
-                authError.textContent = '✅ 注册成功，请登录';
-                isLoginMode = true;
-                toggleAuthLink.textContent = '还没有账号？立即注册';
-                authTitle.textContent = '🔐 登录';
-                authSub.textContent = '已有账号直接登录，新用户请注册';
+            } catch (e) {
+                authError.textContent = '❌ ' + e.message;
+                btnAuth.disabled = false;
                 btnAuth.textContent = '🔗 登录';
-                passwordInput.value = '';
-                // 自动填入用户名
-                usernameInput.value = username;
             }
-        } catch (e) {
-            authError.textContent = '❌ ' + e.message;
-        } finally {
-            btnAuth.disabled = false;
-            btnAuth.textContent = isLoginMode ? '🔗 登录' : '✏️ 注册';
+        } else {
+            // 注册逻辑
+            const username = regUsernameInput.value.trim();
+            const email = emailInput.value.trim();
+            const password = regPasswordInput.value.trim();
+            const code = codeInput.value.trim();
+            if (!username) { authError.textContent = '请输入用户名'; return; }
+            if (!email) { authError.textContent = '请输入邮箱'; return; }
+            if (!password) { authError.textContent = '请输入密码'; return; }
+            if (!code) { authError.textContent = '请输入验证码'; return; }
+            if (password.length < 6) { authError.textContent = '密码至少6位'; return; }
+            authError.textContent = '';
+            btnAuth.disabled = true;
+            btnAuth.textContent = '处理中…';
+            try {
+                const data = await authRequest(false, username, password, email, code);
+                alert('✅ 注册成功！请前往登录');
+                // 自动切换到登录
+                isLoginMode = true;
+                toggleAuthLink.click();
+                // 填充用户名
+                usernameInput.value = username;
+                btnAuth.disabled = false;
+                btnAuth.textContent = '🔗 登录';
+            } catch (e) {
+                authError.textContent = '❌ ' + e.message;
+                btnAuth.disabled = false;
+                btnAuth.textContent = '✏️ 注册';
+            }
         }
     });
 
@@ -991,8 +1107,14 @@
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && authModal.style.display !== 'none') {
             const active = document.activeElement;
-            if (active === usernameInput || active === passwordInput) {
-                btnAuth.click();
+            if (isLoginMode) {
+                if (active === usernameInput || active === passwordInput) {
+                    btnAuth.click();
+                }
+            } else {
+                if (active === regUsernameInput || active === emailInput || active === regPasswordInput || active === codeInput) {
+                    btnAuth.click();
+                }
             }
         }
     });
@@ -1017,7 +1139,7 @@
     // ============================================================
     btnLogout.addEventListener('click', logout);
 
-    // 页面关闭时尝试退出（使用 sendBeacon 确保发送）
+    // 页面关闭时尝试退出
     window.addEventListener('beforeunload', () => {
         if (myUsername) {
             navigator.sendBeacon(SERVER_URL + '/logout', JSON.stringify({ username: myUsername }));
@@ -1027,7 +1149,7 @@
     });
 
     // ============================================================
-    //  自动登录（检查本地存储的凭据）
+    //  自动登录
     // ============================================================
     (async function autoLogin() {
         const cred = getCredentials();
@@ -1045,10 +1167,8 @@
             } catch (e) {
                 console.warn('❌ 自动登录异常:', e.message);
             }
-            // 自动登录失败，清除凭据并显示登录界面
             clearCredentials();
         }
-        // 没有凭据或登录失败，显示登录界面
         authModal.style.display = 'flex';
         chatApp.style.display = 'none';
         usernameInput.focus();
