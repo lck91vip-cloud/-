@@ -18,12 +18,13 @@ CORS(app)
 
 # ===== 邮箱配置（SMTP）=====
 # 请替换为你的真实邮箱和授权码
-MAIL_SERVER = 'smtp.office365.com'
-MAIL_PORT = 587
-MAIL_USE_TLS = True
-MAIL_USE_SSL = False
-MAIL_USERNAME = 'liaotian-shi@outlook.com'
-MAIL_PASSWORD = 'qazmlp123'
+# ===== 邮箱配置（SMTP）=====
+MAIL_SERVER = 'smtp.163.com'
+MAIL_PORT = 465
+MAIL_USE_SSL = True
+MAIL_USE_TLS = False
+MAIL_USERNAME = 'liaotianshi_01@163.com'   # 改成你的163邮箱
+MAIL_PASSWORD = 'ZWjq5hddxThcL3iw'    # 粘贴授权码，不是邮箱密码
 MAIL_DEFAULT_SENDER = MAIL_USERNAME
 
 app.config.update(
